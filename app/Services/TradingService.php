@@ -12,7 +12,7 @@ class TradingService
         return DB::transaction(function () use ($position, $data) {
 
              // Precalculate amount
-             $amount = $data['price'] * $data['volume'];
+             $amount = $data['price'] * $data['volume'] * 100;
 
             // Buat transaksi baru
             $transaction = $position->transactions()->create([

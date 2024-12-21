@@ -24,16 +24,31 @@ class TradingJournalController extends Controller
     public function index(Request $request)
     {
         try {
-            Log::info('Trading positions fetch initiated', [
-                'user_id' => $request->user()->id,
-                'filters' => $request->only(['emiten', 'status', 'date_from', 'date_to'])
-            ]);
-
+            // Build base query with necessary fields
             $query = TradingPosition::query()
+                ->select([
+                    'id',
+                    'user_id',
+                    'emiten',
+                    'type',
+                    'buy_range_low',
+                    'buy_range_high',
+                    'entry_price',
+                    'stop_loss',
+                    'take_profit_1',
+                    'take_profit_2',
+                    'status',
+                    'strategy',
+                    'notes',
+                    'created_at'
+                ])
                 ->where('user_id', $request->user()->id)
-                ->with(['summary', 'transactions' => function($query) {
-                    $query->orderBy('date', 'desc');
-                }]);
+                ->with([
+                    'summary',
+                    'transactions' => function($query) {
+                        $query->orderBy('date', 'desc');
+                    }
+                ]);
 
             // Apply filters
             if ($request->filled('emiten')) {
@@ -44,48 +59,22 @@ class TradingJournalController extends Controller
                 $query->where('status', $request->status);
             }
 
+            // Date range filter
             if ($request->filled(['date_from', 'date_to'])) {
-                try {
-                    $startDate = Carbon::parse($request->date_from)->startOfDay();
-                    $endDate = Carbon::parse($request->date_to)->endOfDay();
+                $startDate = Carbon::parse($request->date_from)->startOfDay();
+                $endDate = Carbon::parse($request->date_to)->endOfDay();
 
-                    $query->whereHas('transactions', function($q) use ($startDate, $endDate) {
-                        $q->whereBetween('date', [$startDate, $endDate]);
-                    });
-                } catch (\Exception $e) {
-                    Log::warning('Date parsing failed', [
-                        'date_from' => $request->date_from,
-                        'date_to' => $request->date_to,
-                        'error' => $e->getMessage()
-                    ]);
-
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Invalid date format'
-                    ], 422);
-                }
+                $query->whereHas('transactions', function($q) use ($startDate, $endDate) {
+                    $q->whereBetween('date', [$startDate, $endDate]);
+                });
             }
 
-            // Add select to optimize query
-            $query->select([
-                'id',
-                'user_id',
-                'emiten',
-                'type',
-                'entry_price',
-                'stop_loss',
-                'take_profit_1',
-                'take_profit_2',
-                'status',
-                'created_at'
-            ]);
-
-            // Execute query with chunking for large datasets
-            $perPage = min($request->input('per_page', 10), 100); // Limit maximum per page
+            // Execute query with pagination
+            $perPage = min($request->input('per_page', 10), 100);
             $positions = $query->paginate($perPage);
 
-            // Transform the data
-            $response = [
+            // Return response
+            return response()->json([
                 'status' => 'success',
                 'data' => [
                     'positions' => $positions->items(),
@@ -98,22 +87,9 @@ class TradingJournalController extends Controller
                         'to' => $positions->lastItem()
                     ]
                 ]
-            ];
-
-            Log::info('Trading positions fetched successfully', [
-                'count' => $positions->count(),
-                'total' => $positions->total()
             ]);
-
-            return response()->json($response);
 
         } catch (\Exception $e) {
-            Log::error('Trading positions fetch failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'user_id' => $request->user()->id
-            ]);
-
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to fetch trading positions',

@@ -23,8 +23,8 @@ class TradingPosition extends Model
     ];
 
     protected $casts = [
-        // 'buy_range_low' => 'decimal:2',
-        // 'buy_range_high' => 'decimal:2',
+        'buy_range_low' => 'decimal:2',
+        'buy_range_high' => 'decimal:2',
         'entry_price' => 'decimal:2',
         'stop_loss' => 'decimal:2',
         'take_profit_1' => 'decimal:2',
