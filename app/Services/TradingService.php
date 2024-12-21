@@ -7,12 +7,13 @@ use Illuminate\Support\Facades\DB;
 
 class TradingService
 {
+    const LOT_SIZE = 100; // 1 lot = 100 lembar
+
     public function addTransaction(TradingPosition $position, array $data)
     {
         return DB::transaction(function () use ($position, $data) {
-
-             // Precalculate amount
-             $amount = $data['price'] * $data['volume'] * 100;
+            // Kalkulasi amount berdasarkan lot (sama seperti frontend)
+            $amount = $data['price'] * $data['volume'] * self::LOT_SIZE;
 
             // Buat transaksi baru
             $transaction = $position->transactions()->create([
@@ -35,7 +36,7 @@ class TradingService
     {
         $transactions = $position->transactions;
 
-        // Hitung total volume dan average price
+        // Hitung volume dalam lot
         $buyTransactions = $transactions->where('type', 'BUY');
         $sellTransactions = $transactions->where('type', 'SELL');
 
@@ -43,15 +44,15 @@ class TradingService
         $totalSellVolume = $sellTransactions->sum('volume');
         $remainingVolume = $totalBuyVolume - $totalSellVolume;
 
-        // Hitung average price
+        // Hitung average price (sudah dalam harga per lembar)
         $totalBuyAmount = $buyTransactions->sum('amount');
-        $averagePrice = $totalBuyVolume > 0 ? $totalBuyAmount / $totalBuyVolume : 0;
+        $averagePrice = $totalBuyVolume > 0 ? ($totalBuyAmount / (self::LOT_SIZE * $totalBuyVolume)) : 0;
 
-        // Hitung PnL
+        // Hitung PnL berdasarkan lot size
         $realizedPnL = $this->calculateRealizedPnL($transactions);
         $unrealizedPnL = $this->calculateUnrealizedPnL($position, $remainingVolume, $averagePrice);
 
-        // Update atau buat summary
+        // Update summary
         $position->summary()->updateOrCreate(
             ['trading_position_id' => $position->id],
             [
@@ -63,7 +64,6 @@ class TradingService
             ]
         );
 
-        // Update status posisi
         if ($remainingVolume === 0) {
             $position->update(['status' => 'CLOSED']);
         }
@@ -88,7 +88,9 @@ class TradingService
                     $buy = $buyQueue->shift();
                     $volumeToCalculate = min($buy['remaining'], $remainingVolume);
 
-                    $realizedPnL += ($transaction->price - $buy['price']) * $volumeToCalculate;
+                    // PnL kalkulasi dengan lot size
+                    $pnl = ($transaction->price - $buy['price']) * $volumeToCalculate * self::LOT_SIZE;
+                    $realizedPnL += $pnl;
                     $remainingVolume -= $volumeToCalculate;
 
                     if ($buy['remaining'] > $volumeToCalculate) {
@@ -107,10 +109,10 @@ class TradingService
 
     private function calculateUnrealizedPnL($position, $remainingVolume, $averagePrice)
     {
-        // Untuk sementara menggunakan last transaction price
-        $lastTransaction = $position->transactions()->latest()->first();
+        $lastTransaction = $position->transactions()->latest('date')->first();
         if (!$lastTransaction) return 0;
 
-        return ($lastTransaction->price - $averagePrice) * $remainingVolume;
+        // Unrealized PnL dengan lot size
+        return ($lastTransaction->price - $averagePrice) * $remainingVolume * self::LOT_SIZE;
     }
 }
